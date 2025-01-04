@@ -1,29 +1,40 @@
-# -CI-CD-with-Jenkins
-Stages
+# Deployment Process
 
-The pipeline consists of several stages that are executed sequentially:
+This README file explains the deployment process for the application, including dependency installation, local build and run, infrastructure planning, Docker image creation, ECR push, Kubernetes deployment, infrastructure provisioning, and notifications.
 
-Install AWS CLI, Terraform, and Helm:
+## Stages
 
-This stage installs the necessary tools required for interacting with AWS, provisioning infrastructure, and deploying applications with Helm.
-Run App on Docker (Frontend & Backend):
+### 1. Install Dependencies
+Install the necessary dependencies:
+- AWS CLI
+- Terraform
+- Helm
 
-This stage builds the frontend and backend applications within Docker containers. It assumes the code for both applications resides in the frontend and backend directories respectively.
-Terraform Plan:
+### 2. Build & Run Locally
+Build and run the frontend and backend applications locally within Docker containers:
+```sh
+docker-compose up --build
 
-This stage initializes the Terraform configuration and executes a plan to preview the infrastructure changes that will be applied.
-Build Docker Image (Frontend & Backend):
+terraform init
+terraform plan
+### 3. Infrastructure Planning
+docker build -t <frontend-image-name> ./frontend
+docker build -t <backend-image-name> ./backend
 
-This stage builds Docker images for the frontend and backend applications. The images are tagged with the latest tag and stored locally.
-Push Image to ECR (Frontend & Backend):
+### 4. Build Docker Images
+docker build -t <frontend-image-name> ./frontend
+docker build -t <backend-image-name> ./backend
 
-This stage assumes an Amazon Elastic Container Registry (ECR) has been configured. It authenticates with ECR using AWS credentials and pushes the built Docker images to the specified ECR repository.
-Deploy to Kubernetes (Frontend & Backend):
+###5. 5. Push to ECR
+aws ecr get-login-password --region <region> | docker login --username AWS --password-stdin <account-id>.dkr.ecr.<region>.amazonaws.com
+docker tag <frontend-image-name>:latest <account-id>.dkr.ecr.<region>.amazonaws.com/<frontend-repo>:latest
+docker tag <backend-image-name>:latest <account-id>.dkr.ecr.<region>.amazonaws.com/<backend-repo>:latest
+docker push <account-id>.dkr.ecr.<region>.amazonaws.com/<frontend-repo>:latest
+docker push <account-id>.dkr.ecr.<region>.amazonaws.com/<backend-repo>:latest
 
-This stage assumes an EKS cluster named my-cluster exists. It updates the kubeconfig file to point to the EKS cluster and leverages Helm to deploy the frontend and backend applications. Helm charts are assumed to reside in the helm/frontend and helm/backend directories respectively.
-Apply Terraform Changes:
+### 6. Kubernetes Deployment
+helm upgrade --install frontend ./helm/frontend
+helm upgrade --install backend ./helm/backend
 
-This stage applies the infrastructure changes planned in the previous Terraform Plan stage.
-Post-processing:
-
-The pipeline sends notifications to a Slack channel (#builds) based on the overall success or failure of the pipeline execution.
+### 7. Infrastructure Provisioning
+terraform apply
