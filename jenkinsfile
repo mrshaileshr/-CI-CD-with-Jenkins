@@ -1,0 +1,140 @@
+pipeline {
+    agent any
+    environment {
+        ECR_REGISTRY = "your_ecr_registry_url"  // Replace with your ECR registry URL
+        FRONTEND_REPO_NAME = "frontend-app"  // Replace with your frontend repo name
+        BACKEND_REPO_NAME = "backend-app"  // Replace with your backend repo name
+        AWS_REGION = "us-east-1"  // Modify if necessary
+        PATH = "/usr/local/bin/:${env.PATH}"
+    }
+    stages {
+        stage("Install AWS CLI") {
+            steps {
+                sh 'curl https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o awscliv2.zip'
+                sh 'unzip -o awscliv2.zip'
+                sh './aws/install --update'
+            }
+        }
+
+        stage("Install Terraform") {
+            steps {
+                sh 'curl -LO https://raw.githubusercontent.com/hashicorp/terraform/master/scripts/install.sh'
+                sh 'chmod +x install.sh'
+                sh './install.sh'
+            }
+        }
+
+        stage("Install Helm") {
+            steps {
+                sh 'curl https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 | bash'
+            }
+        }
+
+        stage("Run App on Docker (Frontend)") {
+            agent {
+                docker {
+                    image 'node:14-alpine'
+                }
+            }
+            steps {
+                withEnv(["HOME=${env.WORKSPACE}"]) {
+                    dir('frontend') {
+                        sh 'npm install'
+                        sh 'npm run build'
+                    }
+                }
+            }
+        }
+
+        stage("Run App on Docker (Backend)") {
+            agent {
+                docker {
+                    image 'node:14-alpine'
+                }
+            }
+            steps {
+                withEnv(["HOME=${env.WORKSPACE}"]) {
+                    dir('backend') {
+                        sh 'npm install'
+                        sh 'npm run build'
+                    }
+                }
+            }
+        }
+
+        stage("Terraform Plan") {
+            steps {
+                script {
+                    sh 'terraform init'  // Initialize Terraform
+                    sh 'terraform plan'  // Plan the infrastructure changes
+                }
+            }
+        }
+
+        stage("Build Docker Image (Frontend)") {
+            steps {
+                script {
+                    sh 'docker build -t "$ECR_REGISTRY/$FRONTEND_REPO_NAME:latest" ./frontend'
+                    sh 'docker image ls'
+                }
+            }
+        }
+
+        stage("Build Docker Image (Backend)") {
+            steps {
+                script {
+                    sh 'docker build -t "$ECR_REGISTRY/$BACKEND_REPO_NAME:latest" ./backend'
+                    sh 'docker image ls'
+                }
+            }
+        }
+
+        stage("Push Image to ECR (Frontend)") {
+            steps {
+                script {
+                    sh 'aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin "$ECR_REGISTRY"'
+                    sh 'docker push "$ECR_REGISTRY/$FRONTEND_REPO_NAME:latest"'
+                }
+            }
+        }
+
+        stage("Push Image to ECR (Backend)") {
+            steps {
+                script {
+                    sh 'aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin "$ECR_REGISTRY"'
+                    sh 'docker push "$ECR_REGISTRY/$BACKEND_REPO_NAME:latest"'
+                }
+            }
+        }
+
+        stage("Deploy to Kubernetes (Frontend & Backend)") {
+            steps {
+                script {
+                    // Update kubeconfig to EKS
+                    sh 'aws eks update-kubeconfig --region $AWS_REGION --name my-cluster'  // Replace with your EKS cluster name
+
+                    // Deploy the app with Helm for both frontend and backend
+                    sh 'helm upgrade --install frontend ./helm/frontend'  // Replace with correct path to Helm chart for frontend
+                    sh 'helm upgrade --install backend ./helm/backend'  // Replace with correct path to Helm chart for backend
+                }
+            }
+        }
+
+        stage("Apply Terraform Changes") {
+            steps {
+                script {
+                    sh 'terraform apply -auto-approve'  // Apply the Terraform changes to provision infrastructure
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            slackSend(channel: '#builds', message: "Frontend and Backend Build and Deployment Successful!")
+        }
+        failure {
+            slackSend(channel: '#builds', message: "Frontend or Backend Build or Deployment Failed!")
+        }
+    }
+}
